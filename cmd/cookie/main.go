@@ -76,37 +76,8 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 }
 
 func Welcome(w http.ResponseWriter, r *http.Request) {
-	// We can obtain the session token from the requests cookies, which come with every request
-	c, err := r.Cookie("session_token")
-	if err != nil {
-		if err == http.ErrNoCookie {
-			// If the cookie is not set, return an unauthorized status
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		// For any other type of error, return a bad request status
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	sessionToken := c.Value
-
-	// We then get the session from our session map
-	userSession, exists := sessions[sessionToken]
-	if !exists {
-		// If the session token is not present in session map, return an unauthorized error
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-	// If the session is present, but has expired, we can delete the session, and return
-	// an unauthorized status
-	if userSession.isExpired() {
-		delete(sessions, sessionToken)
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-
 	// If the session is valid, return the welcome message to the user
-	w.Write([]byte(fmt.Sprintf("Welcome %s!", userSession.username)))
+	w.Write([]byte(fmt.Sprintf("Welcome %s!", r.Header.Get("user_name"))))
 }
 
 func Refresh(w http.ResponseWriter, r *http.Request) {
@@ -182,11 +153,49 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func AuthMiddleware(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// We can obtain the session token from the requests cookies, which come with every request
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			if err == http.ErrNoCookie {
+				// If the cookie is not set, return an unauthorized status
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			// For any other type of error, return a bad request status
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		sessionToken := c.Value
+
+		// We then get the session from our session map
+		userSession, exists := sessions[sessionToken]
+		if !exists {
+			// If the session token is not present in session map, return an unauthorized error
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		// If the session is present, but has expired, we can delete the session, and return
+		// an unauthorized status
+		if userSession.isExpired() {
+			delete(sessions, sessionToken)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		r.Header.Add("user_name", userSession.username)
+
+		h(w, r)
+	}
+
+}
+
 func main() {
-	// "Signin" and "Welcome" are handlers that we have to implement
 	http.HandleFunc("/signin", Signin)
+	http.HandleFunc("/refresh", Refresh)
 	http.HandleFunc("/logout", Logout)
-	http.HandleFunc("/welcome", Welcome)
+	http.HandleFunc("/welcome", AuthMiddleware(Welcome))
 	// start the server on port 8080
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
